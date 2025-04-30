@@ -29,6 +29,7 @@ language:
 options(width = 120)
 ```
 
+Peatüki aluseks olev repositoorium koos täieliku R-i koodi ja andmetega on leitav [siit](https://github.com/indrekso/samm_kaalumine.git).
 
 # Andmete kaalumise olemus ja eesmärk
 
@@ -123,8 +124,8 @@ lang_pop |>
   summarise(kaalumata_keskmine = mean(osakaal))
 
 lang_pop |> 
-  summarise(kaalumata_keskmine = weighted.mean(osakaal, 
-                                               w = elanike_arv))
+  summarise(kaalutud_keskmine = weighted.mean(osakaal, 
+                                               w = elanike_arv)) # argumendile w tuleb omistada kaalutunnuse nimi andmestikus
 ```
 
 Eelnevas näites olid meil riigi tasandile agregeeritud andmed ehk inimeste keeleoskuse andmete põhjal olid arvutatud iga riigi kohta kokkuvõtlikud näitajad. Analüüsides küsitlusandmeid, on enamasti tarvis kaaluda mitte agregeeritud, vaid indiviiditasandi andmeid ehk andmestikku, kus on iga vastaja kohta eraldi andmerida. Järgnevalt vaatlemegi lähemalt andmete kaalumist küsitlusandmete kontekstis ehk juhul, kui analüüsime valikuuringu indiviiditasandil andmeid ja soovime tulemusi üldistada populatsioonile.
@@ -234,7 +235,7 @@ ess10 <- haven::read_sav("data/ess10.sav")
 library(tidyverse)
 
 gr10 <- ess10 |> 
-  filter(cntry == "GR")
+  filter(cntry == "GR") # filtreerime tunnuse cntry alusel Kreeka andmed
 ```
 
 ## Andmete kaalumine kirjeldavas analüüsis
@@ -258,7 +259,7 @@ Funktsioonil `mean`, millega saab R-s arvutada aritmeetilise keskmise, seevastu 
 ```{r}
 gr10 |> 
   summarise(stfhlth_kesk = weighted.mean(stfhlth, w = pspwght, na.rm = TRUE))
-  # argumendiga na.rm = TRUE jäetakse arvutusest välja indiviidid, kellel esineb tunnuses stfhlth andmelünk
+  # funktsioon weighted.mean nõuab argumenti na.rm = TRUE, et arvutusest jäetaks välja indiviidid, kellel esineb tunnuses stfhlth andmelünk
 ```
 
 ### Muude kaalutud jaotusparameetrite arvutamine
