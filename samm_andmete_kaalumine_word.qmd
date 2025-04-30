@@ -1,0 +1,427 @@
+---
+title: "Andmete kaalumine"
+author: "Indrek Soidla"
+date: last-modified
+format: 
+  html:
+    embed-resources: true
+execute: 
+  echo: true
+  warning: false
+  message: false
+lightbox:
+  match: auto
+  effect: fade
+bibliography: references.bib
+csl: apa.csl
+lang: et
+language: 
+  title-block-author-single: "Autor"
+  title-block-published: "Kuupäev"
+  crossref-fig-title: "Joonis"
+  crossref-tbl-title: "Tabel"
+---
+
+```{r}
+#| label: setup
+#| echo: false
+
+options(width = 120)
+```
+
+
+# Andmete kaalumise olemus ja eesmärk
+
+Mida kujutab endast küsitlusandmete kaalumine? Kõige üldisemalt võiks öelda, et tegu on protseduuriga, millega korrigeeritakse uuritava kogumi iga üksikliikme mõjukust analüüsis. Vaatame ühte lihtsamat näidet selle selgitamiseks.
+
+Eurostati andmetel varieerub inimeste osakaal, kes oskavad võõrkeeli, Euroopas riigiti märgatavalt. 
+
+```{r}
+#| echo: false
+#| label: fig-min-3-keelt-tulpdiagramm
+#| fig-cap: "Vähemalt kolme võõrkeelt oskavate elanike osakaal vanusegrupis 18--64 aastat 2022. aastal. Allikas: Eurostat"
+
+library(tidyverse)
+library(eurostat)
+library(countries)
+
+lang <- get_eurostat("edat_aes_l21",
+             filters = list(time = "2022",
+                            sex = "T",
+                            age = "Y18-64"), 
+             type = "label",
+             time_format = "num")
+
+lang <- lang |> 
+  filter(n_lang == "3 languages or more") |> 
+  rename("osakaal" = "values") |> 
+  select(geo, osakaal)
+
+pop <- get_eurostat("demo_pjanbroad", 
+             filters = list(time = "2022", 
+                            sex = "T",
+                            age = "Y15-64"), 
+             type = "label",
+             time_format = "num")
+
+pop <- pop |> 
+  rename("elanike_arv" = "values") |> 
+  select(geo, elanike_arv)
+
+lang_pop <- lang |> 
+  left_join(pop, by = join_by(geo))
+
+lang_pop <- lang_pop |> 
+  filter(!str_detect(geo, "Euro") & !str_detect(geo, "Germany including")) |> 
+  drop_na(elanike_arv, osakaal) |> 
+  mutate(geo = country_name(geo, to = "name_et")) |> 
+  arrange(desc(osakaal)) |> 
+  rename("riik" = "geo")
+
+lang_pop |> 
+  ggplot(aes(x = osakaal, y = fct_reorder(riik, osakaal))) +
+  geom_col() +
+  theme_minimal() +
+  labs(x = "Osakaal (%)",
+       y = "Riik")
+```
+
+Kui soovime teada saada, kui suur osa Euroopa elanikest (täpsemalt, uuritavate riikide elanikest) oskab vähemalt kolme võõrkeelt, kas saaksime selle arvutada [joonisel @fig-min-3-keelt-tulpdiagramm] olevate osakaalude aritmeetilise keskmisena? Ei saaks, tulemus ei oleks täpne -- selline tehe ei võtaks arvesse, et erinevates riikides on elanike arv erinev. Teisiti öeldes, käsitleksime andmeid nii nagu igas riigis oleks (vanusegrupis 18--64 aastat) võrdne arv elanikke. Sellisel juhul oleks osakaalude keskmine `r paste0(round(mean(lang_pop$osakaal), 1), "%")`. See ülehindab vähemalt kolme võõrkeelt oskavate inimeste osakaalu Euroopas, sest väiksemate riikide osakaalud panustavad aritmeetilisse keskmisesse ebaproportsionaalselt rohkem kui nende elanike arv lubaks ning tulemus ei oleks täpne, sest väiksemates riikides on reeglina mitme võõrkeele oskajaid rohkem. Et saada teada, kui suur osa Euroopa elanikest vähemalt kolme võõrkeelt oskab, peaksime keskmise arvutamisel korrigeerima iga riigi osakaalu mõjukust vastavalt riigi elanike arvule vanusegrupis 18--64 ([tabelis @tbl-min-3-keelt])). Tehniliselt ütleksimegi, et kaalume andmed läbi elanike arvuga, selle tulemusena saame kaalutud aritmeetilise keskmise.
+
+```{r}
+#| echo: false
+#| label: tbl-min-3-keelt
+#| tbl-cap: "Vähemalt kolme võõrkeelt oskavate elanike osakaal koos elanike arvuga vanusegrupis 18--64 aastat 2022. aastal. Allikas: Eurostat"
+
+library(gt)
+lang_pop |> 
+  gt() |> 
+  cols_label(riik = "Riik",
+             osakaal = "Osakaal (%)",
+             elanike_arv = "Elanike arv") |> 
+  opt_interactive()
+```
+
+Kui arvutaksime osakaaludest lihtsalt aritmeetilise keskmise, liidetaks osakaalud kokku ja jagataks riikide arvuga. R-s oleks vastav **kaalumata** keskmise arvutamise tehe järgmine:
+
+```{r}
+lang_pop |> # `lang_pop` on objekt, milles asuvad eelneva tabeli andmed
+  summarise(kaalumata_keskmine = sum(osakaal) / n()) # käsk n() annab ridade arvu andmestikus (riikide arvu)
+```
+
+Elanike arvuga **kaalutud** aritmeetilise keskmise puhul korrutatakse iga riigi puhul osakaal elanike arvuga, need korrutised liidetakse ja jagatakse läbi mitte riikide arvuga, vaid kõigi riikide elanike koguarvuga:
+
+```{r}
+lang_pop |> 
+  summarise(kaalutud_keskmine = sum(osakaal * elanike_arv) / sum(elanike_arv))
+```
+
+Loomulikult on R-s ka kaalumata ja kaalutud keskmiste arvutamiseks omaette funktsioonid `mean` ja `weighted.mean`, mis annavad sama tulemuse.
+
+```{r}
+lang_pop |> 
+  summarise(kaalumata_keskmine = mean(osakaal))
+
+lang_pop |> 
+  summarise(kaalumata_keskmine = weighted.mean(osakaal, 
+                                               w = elanike_arv))
+```
+
+Eelnevas näites olid meil riigi tasandile agregeeritud andmed ehk inimeste keeleoskuse andmete põhjal olid arvutatud iga riigi kohta kokkuvõtlikud näitajad. Analüüsides küsitlusandmeid, on enamasti tarvis kaaluda mitte agregeeritud, vaid indiviiditasandi andmeid ehk andmestikku, kus on iga vastaja kohta eraldi andmerida. Järgnevalt vaatlemegi lähemalt andmete kaalumist küsitlusandmete kontekstis ehk juhul, kui analüüsime valikuuringu indiviiditasandil andmeid ja soovime tulemusi üldistada populatsioonile.
+
+Laias laastus on küsitlusandmete kaalumise eesmärk arvutada võimalikult täpsed hinnangud (üldisemalt öeldes statistilised näitajad, olgu need aritmeetilised keskmised või protsentnäitajad või muud keerulisemad näitajad) populatsiooni kohta. Kaalumisel kaalutakse iga indiviidi n-ö üles või alla, nii et ta esindaks kas suuremat või väiksemat hulka populatsiooni liikmetest, vastavalt sellele, kas grupp, mida see indiviid esindab, on küsitlusandmetes ala- või üleesindatud. Teisiti sõnastades on kaalumise eesmärk tõsta küsitlusandmete esinduslikkust populatsiooni suhtes.
+
+Eelnevast nähtub, et kuna esinduslikkust on tarvis tõsta, siis peitub siin varjatud eeldus, et küsitlusandmed ei esinda populatsiooni piisavalt täpselt, st vastajate kogum ei ole täpne vähendatud koopia populatsioonist. Täpsemalt öeldes, kui uurida erinevate vastajaid kirjeldavate tunnuste jaotust vastajate seas ja populatsioonis (olgu need siis vanus, sugu, haridustase vms), siis praktikas esineb ka parimat praktikat järgides võetud valimi korral nendes jaotustes suuremaid või väiksemaid erinevusi. See on praktikas paratamatu, sel on erinevaid põhjuseid ja seetõttu on ka erinevaid võtteid ja meetodeid andmete kaalumiseks. Käesolevas peatükis vaatlemegi neist mõningaid, et selgitada, miks ja mis juhtudel on tarvis andmeid kaaluda ja kuidas seda teha.
+
+# Eri liiki kaalud, nende koostamine ja vajalikkus
+
+Vabalt kasutada olevates küsitlusandmestikes on reeglina kaalutunnused, mille abil andmeid kaaluda, juba olemas, st kaale ei tule ise arvutada. Sellegipoolest eeldab ka olemasolevate kaalude kasutamine reeglina kursis olemist sellega, kuidas need andmed on kogutud, sh kuidas on koostatud küsitluse aluseks olnud valim.
+
+## Disainikaalude põhimõte ja eesmärk
+
+Lihtsa juhuvalimi puhul on kõigil populatsiooni liikmetel võrdne tõenäosus valimisse sattuda. Kiht-, klaster- või mitmeastmelise valimi puhul võivad need tõenäosused -- neid nimetatakse **kaasamistõenäosusteks** -- aga erineda. Kihtvalimi puhul jaotatakse populatsioon valitud tunnus(t)e alusel kihtideks ja tehakse juhuvalik iga kihi sees eraldi, see tõstab valimi esinduslikkust populatsiooni suhtes. Proportsionaalse kihtvalimi puhul on kihtide proportsioonid valimis samad, mis populatsioonis. Vahel võidakse aga otsustada mitteproportsionaalse kihtvalimi kasuks, kus mõne grupi proportsioon valimis võib olla suurem või väiksem kui populatsioonis. Näiteks Eesti Integratsiooni Monitooringu puhul kasutatakse valimit, kus eestlasi ja mitte-eestlasi on sama palju, olgugi, et Eesti rahvastikus ehk populatsioonis on mitte-eestlasi oluliselt vähem. Selle eesmärk on, võrreldes küsitlusandmete põhjal neid kaht gruppi, teha mitte-eestlaste kohta samavõrd täpseid järeldusi kui eestlaste kohta. Kui aga soovitakse neid kaht gruppi analüüsida mitte võrdlevalt, vaid koos (nt mitte arvutada mingi tunnuse aritmeetilised keskmised eestlaste ja mitte-eestlaste kohta eraldi, vaid hinnata selle tunnuse keskmist Eesti rahvastikus tervikuna), on tarvis andmeid kaaluda, et saada mitteproportsionaalse kihtvalimi andmed proportsionaalseks populatsiooniga. Sellisel juhul kasutatakse kaale, mida nimetatakse disainikaaludeks. **Disainikaalude** eesmärk ongi tõsta küsitlusandmete esinduslikkust populatsiooni suhtes, võttes arvesse valimiliikmete erinevaid kaasamistõenäosusi. Disainikaalud arvutatakse nii, et iga indiviidi disainikaalu väärtus on pöördvõrdeline selle indiviidi kaasamistõenäosusega valimisse. Selgitame seda konkreetse näite varal lähemalt järgmises osas.
+
+Samamoodi on reeglina tarvis andmeid disainikaalude abil kaaluda, kui andmed on kogutud klaster- või mitmeastmelise valimi abil. Mitmeastmelise valimitüübi puhul tehakse valik mitmel tasandil, näiteks õpilaste küsitlemise puhul lihtsustab küsitlustööd valim, kus esmalt valitakse koolid (esmane valikutasand on kool), seejärel koolidest klassid (teisene valikutasand) ja klassidest kas kõik õpilased või osad neist (kolmas valikutasand). Selliselt valimi koostamine küll lihtsustab andmekogumist ja nõuab vähem ressursse, kuid eri koolide ja klasside õpilasi tervikuna uurides tuleb arvestada, et õpilaste kaasamistõenäosused erinevad -- teisiti öeldes, eri õpilaste tõenäosus valimisse sattuda on erinev, sõltuvalt sellest, kui palju on koolis klasse ja kui palju on klassis õpilasi. Et teha kogu õpilaskonna ehk populatsiooni suhtes esinduslikke järeldusi, tuleb andmeid kaaluda disainikaaludega, nii et õpilased, kellel oli väiksem võimalus valimisse sattuda, omandaksid analüüsis suurema kaalu (n-ö esindaksid rohkem õpilasi), ja õpilased, kellel oli suurem võimalus valimisse sattuda, omandaksid väiksema kaalu.
+
+## Disainikaalude arvutamine
+
+Selgitame disainikaalude arvutamist mitmeastmelise valimi puhul Dillmani jt (2014:87-88) näite varal. Uuringus, mille populatsiooniks on teatud regiooni elanikud, koostatakse kaheastmeline valim: esmasel valikutasandil valitakse 10000 leibkonna seast juhuslikkuse alusel 1000 leibkonda, teisel valikutasandil valitakse igast leibkonnast juhuslikkuse alusel üks leibkonnaliige. Esimesel valikutasandil on iga leibkonna kaasamistõenäosus ehk tõenäosus sattuda valimisse 1/10 ehk 0.1. Iga inimese kaasamistõenäosus seevastu sõltub sellest, kui palju on tema leibkonnas liikmeid: kaheliikmelises leibkonnas on iga liikme tõenäosus sattuda valimisse 1/10 (leibkonna kaasamistõenäosus) \* 1/2 (leibkonnaliikme kaasamistõenäosus) = 1/20 ehk 0.05. Sellise indiviidi disainikaalu väärtus on pöördvõrdeline tema kaasamistõenäosusega ehk 1 / 0.05 = 20. Viieliikmelises leibkonnas on iga liikme kaasamistõenäosus 1/10 \* 1/5 = 1/50 ehk 0.02; sellise indiviidi disainikaal on 1 / 0.02 = 50.
+
+| Indiviid, kelle leibkonnas on... | Leibkonna kaasamistõenäosus | Indiviidi kaasamistõenäosus leibkonnast | Indiviidi kaasamistõenäosus populatsioonist | Indiviidi disainikaal |
+|:--------------|--------------:|--------------:|--------------:|--------------:|
+| üks liige | 1/10 | 1/1 | 1/10 | 10 |
+| kaks liiget | 1/10 | 1/2 | 1/20 | 20 |
+| kolm liiget | 1/10 | 1/3 | 1/30 | 30 |
+| neli liiget | 1/10 | 1/4 | 1/40 | 40 |
+| viis liiget | 1/10 | 1/5 | 1/50 | 50 |
+
+: Disainikaalude arvutamine kaasamistõenäosuste põhjal mitmeastmelise valimi näitel [@dillman2014: 88]. {#tbl-incl-prob}
+
+[Tabelis @tbl-incl-prob] arvutatud disainikaalud näitavad, kui mitut populatsiooni liiget mingi valimiliige esindab. See tähendab, et kui arvutaksime selles näites kõigile 1000-le valimiliikmele disainikaalud, siis nende summa oleks sama, mis inimeste arv selles regioonis ehk populatsioonis. Praktikas võime andmestikes seevastu kohata disainikaale, kus suur osa kaalude väärtustest jääb 1 ligidale. Sellisel juhul on eelneva näite kohaselt saadud disainikaalud (ehk kaasamistõenäosuste pöördväärtused) jagatud läbi kaalude aritmeetilise keskmisega. Selle tulemusena on disainikaalude aritmeetiline keskmine 1 ning kaalude summa võrdub indiviidide arvuga valimis. Kasutades selliselt arvutatud kaale analüüsis, on kaalutud indiviidide arv võrdne mitte indiviidide arvuga populatsioonis, vaid indiviidide arvuga valimis. Sellist lähenemist kasutatakse küsitlusandmete kaalude arvutamisel üsna tihti ja sellisel kujul on kaalud ka näiteks Euroopa Sotsiaaluuringu andmestikes.
+
+## Millal on tarvis disainikaale kasutada?
+
+Disainikaale on reeglina tarvis kasutada, kui andmed on kogutud tõenäosusliku valimi alusel, kasutades keerukamat valikutüüpi kui lihtne juhuvalim (st valik tehakse kihitatult või klastrite alusel). "Reeglina" ei tähenda siin seda, et kaalumise vallas ennast mitte eriti kindlalt tundes saab otsustada jätta andmed kaalumata, lootes, et ehk on mul tegu ühega neist ülejäänud, ebareeglipärastest juhtumitest. Otsus andmeid kaaluda või kaalumata jätta peaks põhinema konkreetsetel kaalutlustel, võttes lisaks valimi koostamise eripäradele arvesse, milline on analüüsiühik ehk mis on konkreetses olukorras kogum, millele soovime analüüsitulemusi üldistada.
+
+Disainikaalude arvutamise näites, kus valik tehti esmalt leibkondade vahel ja seejärel leibkonnasiseselt, on andmeid kindlasti tarvis disainikaaludega kaaluda, kui soovime teha üldistusi selle regiooni *elanike* kohta (st kogum, millele soovime tulemusi üldistada, on regiooni elanikkond, mitte regiooni leibkonnad). Kui jätaksime sel juhul andmed disainikaaludega kaalumata, mõjutaksid väiksematest leibkondadest pärit vastajad tulemusi ebaproportsionaalselt rohkem. Kui aga soovime teha järeldusi regiooni *leibkondade* kohta -- näiteks küsiti küsitluses andmeid ka leibkondade kohta nagu leibkonna sissetulek --, siis pole andmeid disainikaaludega kaaluda vaja, sest valimi koostamisel oli esimesel valikutasandil kõigil leibkondadel samasugune tõenäosus valimisse sattuda (sest esimesel valikutasandil oli tegu ainult lihtsa juhuvalikuga). Esimeses, Integratsiooni Monitooringu näites on vaja andmeid kaaluda, kui analüüsime eestlaste ja mitte-eestlaste ehk erinevate mitteproportsionaalsete kihtide andmeid koos. Küll aga pole otsest vajadust andmeid kaaluda, kui analüüsime eestlasi ja mitte-eestlasi võrdlevalt, st erinevate kihtide andmeid eraldi.
+
+## Kao kompenseerimine
+
+Disainikaalud võimaldavad elimineerida valimivõtu eripäradest tulenevat esinduslikkuse kadu. Samas esineb valikküsitluste puhul teisigi tegureid, mis võivad esinduslikkust populatsiooni suhtes vähendada, mille tõttu disainikaaludest ei pruugi kaalumisel piisata. Üks neist teguritest on **mittevastamine** ehk valimiliikmete kadu -- kaugeltki mitte kõik valimiliikmed ei soovi või ei saa küsitluses osaleda.
+
+Kui vastamismäär on valimi eri gruppides samasugune, siis ei vähenda mittevastamine veel andmete esinduslikkust -- vastajate hulk on sel juhul küll mittevastamise tõttu väiksem ja seepärast ei pruugi olla võimalik nõrgemaid populatsioonis esinevaid tunnustevahelisi seoseid tuvastada, kuid andmete esinduslikkust see veel ei mõjuta. Reeglina ei ole siiski vastamismäär valimi eri gruppides ühetaoline, vaid erineb teatud määral. Kui vastamismäär eri gruppides, st mingite tunnuste lõikes, erineb (näiteks on vastamismäär nooremates vanusegruppides madalam), saab kannatada esinduslikkus nende tunnuste suhtes ja lisaks selliste tunnuste suhtes, mis on omakorda nende tunnustega seotud. Sellest järeldub, et antud vanuse näites ei tekiks esinduslikkuse osas probleemi näiteks juhul, kui mõõdaksime küsitlusega mingeid väärtushinnanguid, mis ei sõltu vanusest. Üldiselt ei ole see aga realistlik -- väärtushinnangud, olgu need poliitilised, ühiskondlikud, religioossed või muud, ikkagi teatud määral vanuse lõikes varieeruvad. Kui vastamismäär valimi eri gruppides varieerub, ei saa reeglina eeldada, et see tulemuste esinduslikkust ei mõjuta, mistõttu võib olla vaja kaalumisel lisaks arvesse võtta mittevastamisest tulenevat esinduslikkuse kadu.
+
+Selle jaoks on erinevaid võimalusi. Üks võimalus mittevastamise ehk **kao kompenseerimiseks** on leida tunnused, mille lõikes vastamismäär erineb ja mis on seotud muude tunnustega andmestikus, ja nende gruppides leida vastamistõenäosused ehk arvutada igas grupis
+
+-   respondentide (ehk uuringus osalenud valimiliikmete) disainikaalude summa,
+-   valimiliikmete (ehk uuringus osalenud ja mitteosalenud liikmete) disainikaalude summa,
+-   ja leida nende summade suhe ehk jagatis.
+
+Iga respondendi disainikaal tuleb seejärel läbi korrutada eelnevalt kirjeldatud jagatise pöördväärtusega. (Lihtsa juhuvalimi puhul, kus kõigi valimiliikmete kaasamistõenäosused valimisse on samad, saab nimetatud jagatise asemel kasutada lihtsalt vastamismäära grupis.) [Tabeli @tbl-calibr] näites tähendaks see, et kõigi 15-24-aastaste respondentide disainikaal tuleks läbi korrutada 1.622-ga.
+
+|                                     | 15-24  | 25-34  | 35-44  | 45-64  | 65+    | Kokku  |
+|:------------------------------------|-------:|-------:|-------:|-------:|-------:|-------:|
+| Valimimaht                          | 202    | 220    | 180    | 195    | 203    | 1000   |
+| Vastajate arv                       | 124    | 187    | 162    | 187    | 203    | 863    |
+| Disainikaalude summa valimis        | 30322  | 33013  | 27046  | 29272  | 30451  | 150104 |
+| Disainikaalude summa vastajate seas | 18693  | 28143  | 24371  | 28138  | 30451  |        |
+| Vastamistõenäosus                   | 0.6165 | 0.8525 | 0.9011 | 0.9613 | 1.0000 |        |
+| Vastamistõenäosuse pöördväärtus     | 1.622  | 1.173  | 1.110  | 1.040  | 1.000  |        |
+|                                     |        |        |        |        |        |        |
+
+: Disainikaalude kalibreerimine vastamistõenäosuste alusel [@lohr2019: 341]. {#tbl-calibr}
+
+Eelnevalt kirjeldatud meetodil saame kohandada disainikaale nii, et andmete kaalumine vähendaks ka mittevastamisest tulenevat esinduslikkuse kadu (inglise keeles kutsutakse seda meetodit *weighting class adjustment*). Selle eeldus on, et gruppides, mille kohta vastamistõenäosused leiti, vastamistõenäosus ei varieeru. See tähendab, et kui disainikaalude kohandamiseks kasutatakse ainult vanusegrupiti arvutatud vastamistõenäosusi, siis vanusegrupi sees ei tohiks erineda näiteks meeste ja naiste vastamistõenäosused või vastamistõenäosused haridustasemeti vms. See on tugev eeldus, mida püütakse rahuldada vastamistõenäosuste arvutamisega rohkem kui ühe tunnuse lõikes, st rohkemates gruppides. Siiski ei saa gruppe olla ülemäära palju, sest osadesse gruppidesse jääks siis liiga vähe vastajaid, mille tõttu võivad osade indiviidide kaalud olla väga suured, mis omakorda muudaks kaalutud analüüsitulemused n-ö ebastabiilseks.
+
+Silmas tuleb pidada ka seda, et grupikuuluvus peab olema teada kõigi valimiliikmete kohta, st ka nende kohta, kes olid valimis, aga ei osalenud uuringus. See piirab kohandamiseks kasutatavate tunnuste hulka oluliselt, praktikas on nende tunnuste hulk piiratud valikuraamis olevate andmetega.
+
+## Järelkihitamine
+
+Eelnevalt kirjeldatud kao kompenseerimise meetod ongi lihtsasti rakendatav juhul, kui meil on ligipääs andmetele ka mittevastanute kohta (st kogu valimi andmetele), enamasti on see ligipääs vaid uuringu korraldajatel. Kui kasutada on ainult küsitlusandmed ehk andmed küsitletute kohta, on lihtsam kohandada disainikaale **järelkihitamise** meetodil. See ei eelda andmete olemasolu mittevastanute kohta, küll aga eeldab järelkihitamise aluseks olevate (reeglina sotsiaaldemograafiliste) tunnuste ühisjaotuste olemasolu vastanute ja populatsiooni kohta. Vastanute kohta on võimalik need ühisjaotused arvutada küsitlusandmete põhjal, populatsiooni kohta võivad (sõltuvalt populatsiooni ja tunnuste spetsiifilisusest) ühisjaotused leiduda muudes allikates, nt riiklikus statistikas. Järelkihitamise meetodil disainikaalude kohandamine toimub analoogselt eelnevalt kirjeldatud kao kompenseerimisega, ainuke erinevus on see, et arvutustes kasutatakse *valimiliikmete* disainikaalude summa asemel indiviidide arvu vastavas grupis *populatsioonis.* See muidugi eeldab, et respondentide disainikaalude summa põhineb disainikaaludel, mis ei ole läbi jagatud disainikaalude keskmisega, nagu küsitlusandmestikes võib disainikaalude puhul olla tehtud.
+
+Erinevalt eelnevalt kirjeldatud kao kompenseerimise meetodist võimaldab järelkihitamine kompenseerida nii mittevastamisest kui kaetuse veast tulenevat esinduslikkuse kadu. Kaetuse viga tuleneb sellest, et valikuraam ehk loend populatsiooni liikmetest, mida kasutatakse valimi võtmisel, ei kata täpselt populatsiooni (näiteks võib valikuraamis esineda isikuid, kes on nüüdseks surnud või võivad mõne isiku andmed esineda topelt).
+
+# Andmete kaalumine ei ole imerohi
+
+Enne kaalumise praktilise osa juurde minekut väärib tähelepanu veel mõni tõsiasi. Kuigi kaalumine üldjuhul võimaldab tõsta andmete esinduslikkust ja saada populatsiooni kohta täpsemad hinnangud, ei saa kaalumist pidada mingiks imerohuks, mis muudab andmed täiesti esinduslikuks populatsiooni suhtes ja kõrvaldab andmetest kõik vead. Eelkõige käib see just kaalumismeetodite kohta, mis püüavad lahendada mittevastamisest tulenevaid probleeme (nagu eelnevalt kirjeldatud kao kompenseerimine ja järelkihitamine). Miks on see hoiatus oluline? 
+
+- Nagu eelnevalt kirjeldatud, on neil kaalumismeetoditel üsna tugevad eeldused, mida täielikult rahuldada on keeruline, kui mitte võimatu. 
+
+- Pealegi on nende meetodite rakendamises alati teatud määral subjektiivsust, näiteks kaalumise aluseks olevate tunnuste valikul. 
+
+- Mil määral disainikaalude kohandamise meetodid mittevastamisest ja muudest uuringuvigadest tulenevaid probleeme konkreetsel juhul lahendavad ja andmete esinduslikkust parandavad, sõltub paljuski sellest, kas tegu on juhuslike või süstemaatiliste vigadega (vt lähemalt uuringu koguvea kontseptsiooni kohta). Mittevastamise puhul tähendab see laias laastus seda, kas uuringus osalenud valimiliikmete kogum (respondendid) ja mitteosalenud valimiliikmete kogum (mittevastanud) on mõõdetavate tunnuste poolest samasugused või mitte. 
+
+  - Kui on, töötavad disainikaalude kohandamise meetodid hästi (õieti pole neid otseselt vaja rakendadagi, sest sel juhul on vastanute kogum juba esinduslik ka populatsiooni suhtes). See on paraku ideaaljuhtum, mida esineb harva. 
+  - Kui ei ole samasugused, sõltub kaalumise edukus sellest, kuivõrd on need erinevused seletatavad kaalumise aluseks olevate tunnustega. Näiteks võib juhtuda, et vastanud ja mittevastanud erinevad mingite mõõdetud väärtushinnangute osas. Kui kohandame sellisel juhul disainikaale, kompenseerides mittevastamist näiteks vanuse, soo ja elukoha alusel, aga mõõdetud väärtushinnangud on nimetatud tunnustega seotud ainult nõrgalt, ei paranda see väärtushinnangute analüüsil saadavate tulemuste esinduslikkust kuigivõrd. Ka juhul, kui kaalumise aluseks olevad tunnused on mõõdetavate tunnustega seotud, ei ole need seosed üks-ühesed; kõik mõõdetavad tunnused ei ole kaalumise aluseks olevate tunnustega ühtmoodi ja samavõrd tugevalt seotud, osad mõõdetavad tunnused ei pruugi nendega üldse olla seotud. 
+
+- Kui tegu on süstemaatiliste vigadega, võib andmete kaalumine teatud juhtudel tulemuste esinduslikkust isegi halvendada. Näiteks on tänapäeval telefoniküsitlustes raskem vastama saada nooremaealisi. Võib eeldada, et need noored, kes võõrale numbrile vastavad, on üldiselt usaldavamad kui nende eakaaslased üldiselt. Seega, kui uuringuküsimustega mõõdetakse näiteks usaldustaset ühiskonnas, on küsitletute seas alaesindatud madalama usaldustasemega vastajad ning kaalumata tulemused näitavad usaldustaset kõrgemana kui see tegelikult on. Kui sel juhul andmeid veel vanuse alusel kaaluda, st üles kaaluda nooremaid vastajaid, kes on niigi kõrgema usaldustasemega, näitaksid analüüsitulemused usaldustaset ekslikult veelgi kõrgemana. Seega on disainikaalude kohandamise jaoks tunnuste valikul (ja kohandatud kaalude kasutamisel) oluline arvesse võtta mitte ainult seda, millised tunnused on seotud mittevastamise ja teiste mõõdetavate tunnustega, vaid ka seda, millised need seosed on.
+
+- Kaalud arvutatakse kompenseerima n-ö objekti kadu ehk nende valimiliikmete kadu, kes uuringus üldse ei osalenud. Samas esineb küsitlusandmetes ka küsimusele mittevastamist, kus muidu koostööaldis respondent ei soovi või ei oska mingile konkreetsele ankeediküsimusele vastust anda. Olenevalt küsimusest võib selline andmete kadu olla märkimisväärne -- sellist kadu kaalumine ei kompenseeri (kui soovime, et kompenseeriks, tuleks arvutada uued, konkreetse küsimuse mittevastamist arvestavad kaalud).
+
+Seega tuleks igasugustesse väidetesse, mis käsitlevad kaalutud andmeid kui esinduslike ja kallutamata tulemuste garantiid, suhtuda eluterve skepsisega. Üldjuhul kehtib reegel, et kehva või olematu metoodikaga kogutud andmete puhul ei aita ka kaalumine esinduslikkust parandada. Usaldusväärse uuringuraporti puhul peaks kaalumise läbipaistvuse tagamiseks olema välja toodud, kas ja kuidas andmeid kaaluti, kuidas olid kaalud koostatud, sh milliseid tunnuseid kaalude arvutamisel kasutati ja millistest allikatest saadi andmed populatsiooni kohta (nt järelkihitamise jaoks) [@aapor_disclosure_standards2025].
+
+# Andmete kaalumine: praktilised näited R-s
+
+Vaatame Euroopa Sotsiaaluuringu (ESS) näitel, kuidas kaaluda andmeid R-s. ESS-i andmestikes on disainikaalud tunnuses `dweight`, n-ö järelkihituskaalud ehk järelkihitamise alusel kohandatud disainikaalud on tunnuses `pspwght`. ESS-i andmeid analüüsides soovitatakse kasutada kaale, mis on järelkihitamisega kohandatud, sest need võimaldavad korrigeerida mittevastamisest jm vigadest tulenevaid nihkeid [@ess_weighting_guide2023]. Järgnevates näidetes ongi kasutatud kaalumiseks tunnust `pspwght`.
+
+Avame R-s ESS-i 10. küsitluslaine ehk 2020/21. aasta andmestiku, mis on alla laetud [ESS-i andmeportaalist](https://ess.sikt.no/en/). Võtame näite aluseks ühe riigi, kus kasutati mitmetasemelist valikuskeemi, andmed (mitmetasemelise valimi puhul on kaalumise mõju tulemustele reeglina suurem). Antud näites on selliseks riigiks Kreeka, kus kasutati kolmeastmelist valimit (esimesel astmel valikuühikuks rahvaloenduse piirkond, teisel astmel sisuliselt leibkond, kolmandal leibkonnaliige) ning esimesel astmel kasutati ka kihitamist. See taustainfo on leitav ESS-i andmeportaali [10. küsitluslaine leheküljelt](https://ess.sikt.no/en/study/172ac431-2a06-41df-9dab-c1fd8f3877e7) (*Country documentation* => *Greece*).
+
+Loome uue andmeobjekti `ess10` ja omistame sellele ESS-i 10. laine andmestiku, mille laeme R-i paketi `haven` funktsiooni `read_sav` abil.
+
+```{r}
+ess10 <- haven::read_sav("data/ess10.sav")
+
+library(tidyverse)
+
+gr10 <- ess10 |> 
+  filter(cntry == "GR")
+```
+
+## Andmete kaalumine kirjeldavas analüüsis
+
+**Kuidas arvutada R-s kirjeldavaid kaalutud näitajaid, st punkthinnanguid** nagu kaalutud aritmeetiline keskmine, kaalutud standardhälve või tunnuse kaalutud jaotus? Selleks saab kasutada R-i sisseehitatud pakettide (n-ö *base* R), paketi `dplyr` või muude pakettide võimalusi. Järgnevalt ongi toodud mõned punkthinnangute arvutamise näited.
+
+### Tunnuse kaalutud sagedusjaotuse arvutamine
+
+Arvtame tunnuse `netusoft` (vastaja internetikasutuse sagedus) jaotuse funktsiooniga `dplyr::count`. Kui soovime kaalutud jaotust, tuleb käsku lisada argument `wt`, mille väärtuseks on kaalutunnus. Siinses näites arvutataksegi tunnuse `netusoft` kaalutud jaotus, mis esitatakse väljundtabelis veerus `n`; selle veeru väärtuste alusel arvutatakse funktsiooni `mutate` abil ka suhteline kaalutud jaotus ehk kaalutud protsentnäitajad. Pakett `dplyr` on osa `tidyverse`-st, mille eelnevalt laadisime `library`-käsuga mällu, seetõttu pole tarvis `dplyr`'it eraldi laadida.
+
+```{r}
+gr10 |> 
+  count(netusoft, wt = pspwght) |> 
+  mutate(protsent = n / sum(n) * 100)
+```
+
+### Kaalutud aritmeetilise keskmise arvutamine
+
+Funktsioonil `mean`, millega saab R-s arvutada aritmeetilise keskmise, seevastu pole kaalumiseks eraldi argumenti (käivita funktsiooni nimi koos küsimärgiga nime ees, et näha, milliseid argumente funktsioon võimaldab kasutada). R-i põhipaketis on kaalutud keskmise arvutamiseks eraldi funktsioon `weighted.mean`, millel on andmete kaalumiseks argument `w`. Järgnevas näites arvutatakse tervishoiusüsteemiga rahulolu (tunnus `stfhlth`) kaalutud keskmine, võttes abiks funktsiooni `dplyr::summarise`.
+
+```{r}
+gr10 |> 
+  summarise(stfhlth_kesk = weighted.mean(stfhlth, w = pspwght, na.rm = TRUE))
+  # argumendiga na.rm = TRUE jäetakse arvutusest välja indiviidid, kellel esineb tunnuses stfhlth andmelünk
+```
+
+### Muude kaalutud jaotusparameetrite arvutamine
+
+Mitmeid erinevaid jaotusparameetreid saab arvutada näiteks paketis TAM olevate funktsioonide abil (vt lähemalt käsuga `?TAM::weighted_mean`)
+
+```{r}
+library(TAM)
+
+gr10 |> 
+  summarise(stfhlth_kesk = weighted_mean(stfhlth, w = pspwght),
+            stfhlth_sthälve = weighted_sd(stfhlth, w = pspwght),
+            stfhlth_asümmeetria = weighted_skewness(stfhlth, w = pspwght),
+            stfhlth_järskus = weighted_kurtosis(stfhlth, w = pspwght))
+```
+
+## Andmete kaalumine järeldavas analüüsis
+
+Eelnevad andmete kaalumise näited olid punkthinnangute kohta. Tulenevalt asjaolust, et analüüsime valimi andmeid, mitte kogu populatsiooni, ei pruugi siiski punkthinnang populatsiooni täpselt kirjeldada (ka kaalumisest hoolimata). Ka parimate valimi koostamise ja kaalumise praktikate puhul esineb enamasti teatud viga selle tõttu, et juhuslikkuse alusel võetud valim võib populatsioonist mõnevõrra erineda -- indiviidide jaotus (nt sotsiaaldemografiliste või mis tahes muude tunnuste alusel) võib valimis teatud määral erineda jaotusest populatsioonis. Et saada populatsiooni kohta täpsemad hinnangud, peaksime kasutama lisaks kirjeldavatele näitajatele ka **järeldavat analüüsi**, näiteks arvutama lisaks punkthinnangutele ka vahemikhinnangud (usalduspiirid) ja seoste või erinevuste esinemise hindamiseks populatsioonis läbi viima statistilisi teste. 
+
+**Kuidas kaaluda R-s andmeid järeldavas analüüsis?** R-s on erinevates pakettides funktsioone statistiliste testide jaoks, mis võimaldavad andmeid kaalutunnuse alusel kaaluda, nt `weights::wtd.t.test` kaalutud *t*-testi jaoks. Selline, ainult kaalutunnuse arvestamine andmete kaalumisel, on järeldavas analüüsis adekvaatne lähenemine juhul, kui andmed on saadud lihtsa juhuvaliku alusel. Kui aga on kasutatud keerukamat tõenäosuslikku valimit (ja tihtilugu on küsitlusuuringutes seda tehtud), ei pruugi lihtsalt kaalutunnusega kaalumisest järeldaval analüüsil täpsete tulemuste saamiseks piisata -- siin on kaalumisel tarvis täpsemalt arvesse võtta ka valimivõtu eripärasid ehk valikudisaini, mida on valimi koostamisel kasutatud. Lihtsustatult öeldes tähendab see mitte ainult kaasamistõenäosuste erinevuste arvesse võtmist, vaid ka selle arvestamist, millised indiviidid asuvad millistes kihtides ja/või klastrites.
+
+Miks piisab järeldavas analüüsis lihtsa juhuvalimi korral pelgalt kaalumisest, aga keerulisema valikuskeemi puhul tuleb arvestada valikudisainiga? Kihtvalimi puhul jaotatakse populatsioon kihtideks ja juhuslik valik tehakse kihtide sees. See vähendab valimi hajuvust ning reeglina parandab valimi esinduslikkust populatsiooni suhtes, mille tõttu on näiteks punkthinnangute standardvead mõnevõrra väiksemad kui tavalised, lihtsa juhuvalimi jaoks mõeldud standarvea arvutamise meetodid võimaldaksid järeldada. Klastrite puhul ei ole valimiliikmed üksteisest sõltumatud -- kuna klastrid moodustatakse mingi tunnuse alusel, on see siis elukoht või õppimine mingis koolis ja klassis, on ühes klastris olevad liikmed üksteisele reeglina mõnevõrra sarnasemad kui muude klastrite liikmetele. See suurendab mõõdetavate tunnuste hajuvust ja omakorda punkthinnangute standardvigu. Andmete kaalumisel seda klastritesisest homogeensust ja klastritevahelist heterogeensust ehk valikudisaini mitte arvestades hindaksime järeldaval analüüsil andmete täpsust üle ehk saaksime näiteks punkthinnangutele kitsamad usaldusvahemikud kui oleks tegelikult kohane.
+
+R-s võimaldavad andmete kaalumisel valikudisaini arvestada näiteks paketid `survey` [@lumley2010] ja selle põhjal koostatud pakett `srvyr` [@freedman2024]. Pakett `survey` on vanem ja täielikum, samas on `srvyr` lihtsam kasutada neile, kes on R-s harjunud `tidyverse`'i süntaksiga, ja võimaldab käskudesse integreerida `dplyr`'i funktsioone.
+
+Mõlema paketi võimaluste kasutamiseks tuleb esmalt seadistada andmete kaalumine ja valikudisain, paketis `srvyr` on selleks funktsioon `as_survey_design`. Selle funktsiooni põhilised argumendid on
+
+-   `.data` ehk andmestik;
+-   `ids`; selle väärtuseks tuleb omistada andmestikust tunnus(ed), mis sisaldab/-vad infot selle kohta, millisesse klastrisse vastaval andmereal olev indiviid kuulub. ESS-i andmestikes on taoline info tunnuses `psu`;
+-   `strata`, mille väärtuseks saab antud näites `stratum` ehk andmestikust tunnus, milles on kirjas, millisesse valikukihti mingi indiviid kuulus (juhul, kui valimi võtmisel kasutati kihte ehk populatsioon jaotati kihtideks).
+-   `weights` ehk kaalutunnus.
+
+Paketid `survey` ja `srvyr` eeldavad vaikimisi, et andmeid kaalutakse disainikaaludega. Et järelkihitamist või muud disainikaalude kohandamist järeldaval analüüsil täpselt arvesse võtta, tuleks kohandatud kaalud uuesti kalibreerida. See on võimalik (vt täpsemalt [siit](https://cran.r-project.org/web/packages/survey/vignettes/precalibrated.pdf)), aga ESS-i andmete puhul keerulisem, sest ESS-i andmestikes on kaalud kujul, kus kaalude summa on ligikaudu võrdne indiviidide arvuga andmestikus, mitte indiviidide arvuga populatsioonis. Alternatiiv, mida praktikas tihtipeale kasutatakse, on käsitleda kohandatud kaale justkui oleks tegu tavaliste disainikaaludega, mis uuesti kalibreerimist ei nõua. Sellega saadakse küll mõnevõrra konservatiivsemad hinnangud (nt mõnevõrra laiemad usaldusvahemikud kui järelkihitatud disainikaalud tegelikult eeldaks), aga erinevus ei ole enamasti suur [@lumley2021]. Ka ESS-i andmete kaalumise juhend pakub välja sellise lähenemise, seda on ka järgnevas käsus kasutatud, kus argumendi `weights` väärtuseks on `pspwght`.
+
+```{r}
+library(srvyr)
+
+gr10w <- as_survey_design(.data = gr10, ids = psu, strata = stratum, weights = pspwght)
+```
+
+### Usalduspiiride arvutamine kaalutud andmetega
+
+Valikudisaini objekti `ee10w` ehk objekti, kus on koos küsitlusandmestik koos valikudisaini ja kaalumise seadistusega, saab kasutada sisendina järeldavas analüüsis, nt standardvigade/usalduspiiride arvutamiseks või statistiliste testide jaoks. Selle jaoks tuleb kasutada vastavaid `srvyr` või `survey` pakettide funktsioone, nt aritmeetilise keskmise ja selle standardvea/usalduspiiride arvutamiseks ei saa kasutada lihtsalt funktsiooni `weighted.mean` vms, vaid tuleb kasutada funktsioone `srvyr::survey_mean` või `survey::svymean`. Siinkohal on toodud kaalutud keskmiste arvutamise näide neist esimesega; argumendiga `vartype` saab selle funktsiooni puhul seadistada usalduspiiride vm näitajate arvutamise (`"ci"`), vaikeseadena arvutatakse muidu ainult keskmise standardviga (`"se"`). Allolevas näites arvutatakse keskmine rahulolu tervishoiusüsteemiga ja selle standardviga ja usalduspiirid tervisehinnangu lõikes (eelnevalt kodeeritakse väga halva tervisehinnanguga vastajad, keda on väga vähe, kokku halva tervisehinnanguga vastajatega), lisaks arvutatakse `summarise`-käsus kaalutud vastajate arv (esitatakse väljundtabeli veerus `n`). Usalduspiirid arvutatakse vaikimisi usaldusnivool 95%, vajadusel saab seda muuta `survey_mean` argumendi `level` abil (kõigi argumentide vaikeseadeid ja võimalike sätteid saab uurida käsuga `?survey_mean`).
+
+```{r}
+gr10w |> 
+  mutate(health4 = case_match(health,
+                              5 ~ 4,
+                              .default = health)) |> 
+  group_by(health4) |> 
+  summarise(stfhlth_kesk = survey_mean(stfhlth, na.rm = TRUE, vartype = c("se", "ci")),
+            n = sum(pspwght))
+```
+
+Funktsiooniga `srvyr::survey_prop` saab arvutada tunnuse kaalutud jaotuse, grupeerides eelnevalt andmestiku selle tunnuse alusel, mille jaotust soovime saada. Arvutame siinkohal internetikasutuse sageduse kaalutud jaotuse ning osakaalude standardvead ja usalduspiirid.
+
+```{r}
+gr10w |> 
+  group_by(netusoft) |> 
+  summarise(prop = survey_prop(vartype = c("se", "ci")))
+```
+
+Järgnev näide ilmestab andmete kaalumise ja valikudisaini arvesse võtmise mõju analüüsitulemustele. Arvutatakse tunnuse `netusoft` kaalutud jaotus ja osakaalude usalduspiirid usaldusnivool 95%, kasutades erinevaid kaalumise seadeid. [Joonisel @fig-comp-ci] esitatakse suurima osakaalu (internetti igapäevaselt kasutavate inimeste protsent) punkt- ja vahemikhinnang (usaldusnivool 95%) eri kaalumise seadete korral.
+
+```{r echo = FALSE}
+arvuta_up <- function(valikudisaini_objekt, tunnus) {
+  valikudisaini_objekt |> 
+  group_by({{tunnus}}) |> 
+  summarise(prop := survey_prop(vartype = "ci"))
+}
+
+prop_none <- gr10  |>  
+  as_survey_design() |> 
+  arvuta_up(tunnus = netusoft)
+
+prop_dweight <- gr10 |> 
+  as_survey_design(weights = dweight) |> 
+  arvuta_up(tunnus = netusoft)
+
+prop_dweight_svydesign <- gr10 |> 
+  as_survey_design(ids = psu, strata = stratum, weights = dweight) |> 
+  arvuta_up(tunnus = netusoft)
+
+prop_pspwght <- gr10 |> 
+  as_survey_design(weights = pspwght) |> 
+  arvuta_up(tunnus = netusoft)
+
+prop_pspwght_svydesign <- gr10 |> 
+  as_survey_design(ids = psu, strata = stratum, weights = pspwght) |> 
+  arvuta_up(tunnus = netusoft)
+
+prop_df <- list(prop_none, 
+                prop_dweight, 
+                prop_dweight_svydesign, 
+                prop_pspwght, 
+                prop_pspwght_svydesign) |> 
+  bind_rows() |> 
+  mutate(meetod = rep(c("Kaalumata", 
+                        "Disainikaaludega", 
+                        "Disainikaaludega + valikudisain", 
+                        "Disainikaalud järelkihitamisega", 
+                        "Disainikaalud järelkihitamisega + valikudisain"), 
+                      each = 6) |> 
+           as_factor())
+```
+
+```{r}
+#| label: fig-comp-ci
+#| fig-cap: "Kreekas internetti igapäevaselt kasutavate inimeste osakaalu punkt- ja vahemikhinnang (usaldusnivool 95%) eri kaalumise seadete korral."
+#| echo: FALSE
+
+library(showtext)
+font_add_google("Rubik")
+showtext_auto() 
+
+prop_df |> 
+  filter(netusoft == 5) |> 
+ggplot(aes(y = meetod, x = prop)) +
+  geom_point() +
+  geom_errorbar(aes(xmin = prop_low, xmax = prop_upp), width = 0.1) +
+  scale_x_continuous(labels = scales::percent) +
+  scale_y_discrete(labels = ~ str_wrap(.x, width = 20)) +
+  labs(x = "Osakaal (%)",
+       y = "Kaalumismeetod",
+       caption = "Andmed: ESS 10. küsitluslaine") +
+  theme_bw(base_family = "Rubik") +
+  theme(text = element_text(size = 20, lineheight = 0.6))
+```
+
+[Jooniselt @fig-comp-ci] ilmneb, et kui kasutada osakaalu arvutamisel ainult disainikaale, on punkthinnang antud juhul paari protsendipunkti võrra kõrgem ja selle usaldusvahemik natuke laiem kui andmed kaalumata jättes. Üldjuhul ongi nii, et kaalumisel võib usaldusvahemik muutuda mõnevõrra laiemaks, sest kaalumine suurendab variatiivsust andmetes. Kui lisaks disainikaaludega kaalumisele võtta arvesse ka valikudisaini, jääb punkthinnang võrreldes ainult kaalumisega samaks, ent märkimisväärselt suureneb usaldusvahemik. See tuleneb asjaolust, et nüüd arvestatakse usalduspiiride arvutamisel ka valimi võtmisel kasutatud mitmeastmelise valikuga (ühes piirkonnas asuvad leibkonnad on keskmiselt üksteisele sarnasemad kui teiste piirkondade leibkondadele). 
+
+Samalaadseid erinevusi võrreldes kaalumata andmetelt tehtud arvutustega näeme ka juhul, kui disainikaale on kohandatud järelkihitamise alusel. Põhjus, miks punkthinnangud antud juhul eelnevaga võrreldes erinevad, tuleneb erinevast vastamismäärast eri interneti kasutamise sagedusega valimiliikmete seas (täpsemalt öeldes küll sellest, kuidas interneti kasutamise sagedus on seotud järelkihitamise aluseks olevate tunnustega ja vastamismäärast nende tunnuste lõikes). 
+
+**Olulised järeldused [jooniselt @fig-comp-ci]** on, et andmeid kaalumata võime eksida punkthinnangutes (ja sellest tulenevalt ka usalduspiiride väärtustes), valikudisaini arvestamata jättes võime alahinnata vahemikhinnangute laiust ehk määramatust valimi alusel leitavates hinnangutes. Kasutades disainikaale ilma järelkihitamiseta saame küll arvutada näitajad, mis arvestavad valimivõtu eripäradega, ent ei arvesta mittevastamisest lähtuva esinduslikkuse vähenemisega. Seega, eeldusel, et järelkihitamisel on kasutatud sobivaid tunnuseid, mis on seotud mittevastamise mustrite ja analüüsitavate tunnustega, võimaldab järelkihitamisega kohandatud disainikaalude rakendamine koos valikudisaini arvesse võtmisega leida täpsemad hinnangud.
+
+### Statistiliste testide läbiviimine kaalutud andmetega
+
+Paketid `srvyr` ja `survey` võimaldavad kaalutud andmetega läbi viia ka statistilisi teste. Need paketid töötavad koos: näiteks funktsioon `svyttest`, millega saab teha *t*-testi, on paketis `survey`, kuid selle sisendiks sobib meie varasemalt `srvyr`-i abil koostatud valikudisaini objekt `gr10w`. 
+
+Testime näitena, kas meeste ja naiste keskmine rahulolutase tervishoiusüsteemiga erineb. Funktsioon `svyttest` nõuab argumendi `formula` väärtusena testitavat mudelit valemi kujul, kus tildest ehk `~`-märgist vasakul pool on *t*-testi puhul arvuline tunnus, mille keskmisi võrreldakse (antud juhul rahulolu tervishoiusüsteemiga) ja paremal pool kategoriaalne tunnus (siin sugu). Argumendis `design` väärtuseks peab olema valikudisaini objekt, mis meil on juba eelnevalt defineeritud `gr10w`.
+
+```{r}
+library(survey)
+
+svyttest(formula = stfhlth ~ gndr, design = gr10w)
+```
+
+Kaalutud *t*-testi tulemuste tõlgendus järgib sama loogikat, mida kasutatakse kaalumata andmete puhul. Antud juhul näitavad tulemused, et pole alust väita meeste ja naiste keskmise rahulolutaseme erinevust: *t*-statistiku olulisuse tõenäosus on kõrge (*p* = 0.972) ja ka keskmiste erinevuse usalduspiirid on nullile lähedal.
+
+Paketi `survey` abil saab kaalutud andmete põhjal koostada ka üldistatud lineaarseid regressioonimudeleid, Coxi regressioonimudeleid, loglineaarseid mudeleid ja kasutada muid analüüsimeetodeid. Vt lähemat infot paketi [@lumley2024] veebilehelt.
+
+## Populatsioonikaaludega kaalumine Euroopa Sotsiaaluuringu andmetes
+
+Euroopa Sotsiaaluuringu andmete kaalumise kohta olgu veel öeldud, et andmestikus on lisaks kaalutunnus `pweight`. Tegu on populatsioonikaaludega, mis võtavad arvesse asjaolu, et elanike arv erineb riigiti kordades, samas kui vastajate arv on riigiti samas suurusjärgus. Populatsioonikaale oleks tarvis kasutada juhul, kui analüüsitakse mitme riigi andmeid koos, st kogum, millele tulemusi soovitakse üldistada, pole ühe riigi elanikkond, vaid mitme riigi elanikkond tervikuna. See tähendab, et soovime teha järeldusi riikideülese regiooni kui terviku kohta, näiteks soovime teada, milline on üldistatud usalduse tase Baltikumis tervikuna või milline on seos sisserändesse suhtumise ja vanuse vahel Põhjala regioonis üldiselt. Ilma populatsioonikaale kasutamata oleksid väiksemate riikide vastajad tulemustes üleesindatud.
+
+Kui soovime populatsioonikaale kasutada, ei tohiks andmeid lihtsalt kaaluda tunnusega `pweight`, vaid arvestada tuleks ka disainikaale ja nende järelkihitamisega kohandamist. Seetõttu tuleks populatsioonikaalud läbi korrutada järelkihitamisega kohandatud disainikaaludega ja kaaluda andmestikku saadud korrutiste alusel:
+
+```{r}
+gr10 <- gr10 |> 
+  mutate(anweight = pspwght * pweight)
+```
+
+Alates 9. küsitluslainest on see tehe juba andmete kasutaja eest ära tehtud, st nende lainete andmestikes on juba ka tunnus `anweight`. ESS-i kaalumise juhendites [@ess_weighting_methodology] üldiselt soovitataksegi igasugustes analüüsides kasutada seda kaalutunnust. Käesolevas SAMM-u peatükis, kus tegeletakse ainult ühe riigi andmete analüüsiga, on siiski läbivalt kasutatud kaalumiseks tunnust `pspwght`. Selle eelis on, et ühe riigi andmeid (või riike võrdlevalt, eri kogumitena) analüüsides on indiviidide kaalutud koguarv sama, mis indiviidide koguarv kaalumata andmestikus. See võimaldab andmetes paremini orienteeruda -- tunnusega `anweight` andmeid kaaludes oleks nt Eesti vastajate kaalutud koguarv saja-paarisaja ringis, mis on informatiivne ainult juhul, kui analüüsime eri riikide andmeid ühe tervikuna.
+
+## Viited
