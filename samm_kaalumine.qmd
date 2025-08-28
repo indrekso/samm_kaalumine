@@ -45,6 +45,10 @@ Eurostati andmetel varieerub inimeste osakaal, kes oskavad võõrkeeli, Euroopas
 library(tidyverse)
 library(eurostat)
 library(countries)
+library(showtext)
+
+font_add_google("Rubik")
+showtext_auto() 
 
 lang <- get_eurostat("edat_aes_l21",
              filters = list(time = "2022",
@@ -82,9 +86,9 @@ lang_pop <- lang_pop |>
 lang_pop |> 
   ggplot(aes(x = osakaal, y = fct_reorder(riik, osakaal))) +
   geom_col() +
-  theme_minimal() +
   labs(x = "Osakaal (%)",
-       y = "Riik")
+       y = "Riik") +
+  theme_minimal(base_family = "Rubik")
 ```
 
 Kui soovime teada saada, kui suur osa Euroopa elanikest (täpsemalt, uuritavate riikide elanikest) oskab vähemalt kolme võõrkeelt, kas saaksime selle arvutada [joonisel @fig-min-3-keelt-tulpdiagramm] olevate osakaalude aritmeetilise keskmisena? Ei saaks, tulemus ei oleks täpne -- selline tehe ei võtaks arvesse, et erinevates riikides on elanike arv erinev. Teisiti öeldes, käsitleksime andmeid nii nagu igas riigis oleks (vanusegrupis 18--64 aastat) võrdne arv elanikke. Sellisel juhul oleks osakaalude keskmine `r paste0(round(mean(lang_pop$osakaal), 1), "%")`. See ülehindab vähemalt kolme võõrkeelt oskavate inimeste osakaalu Euroopas, sest väiksemate riikide osakaalud panustavad aritmeetilisse keskmisesse ebaproportsionaalselt rohkem kui nende elanike arv lubaks ning tulemus ei oleks täpne, sest väiksemates riikides on reeglina mitme võõrkeele oskajaid rohkem. Et saada teada, kui suur osa Euroopa elanikest vähemalt kolme võõrkeelt oskab, peaksime keskmise arvutamisel korrigeerima iga riigi osakaalu mõjukust vastavalt riigi elanike arvule vanusegrupis 18--64 ([tabelis @tbl-min-3-keelt])). Tehniliselt ütleksimegi, et kaalume andmed läbi elanike arvuga, selle tulemusena saame kaalutud aritmeetilise keskmise.
@@ -92,7 +96,7 @@ Kui soovime teada saada, kui suur osa Euroopa elanikest (täpsemalt, uuritavate 
 ```{r}
 #| echo: false
 #| label: tbl-min-3-keelt
-#| tbl-cap: "Vähemalt kolme võõrkeelt oskavate elanike osakaal koos elanike arvuga vanusegrupis 18--64 aastat 2022. aastal. Allikas: Eurostat"
+#| tbl-cap: "Vähemalt kolme võõrkeelt oskavate elanike osakaal koos elanike arvuga vanusegrupis 18--64 aastat 2022. aastal"
 
 library(gt)
 lang_pop |> 
@@ -100,12 +104,15 @@ lang_pop |>
   cols_label(riik = "Riik",
              osakaal = "Osakaal (%)",
              elanike_arv = "Elanike arv") |> 
+  tab_source_note(md("*Allikas: Eurostat*")) |> 
   opt_interactive()
 ```
 
 Kui arvutaksime osakaaludest lihtsalt aritmeetilise keskmise, liidetaks osakaalud kokku ja jagataks riikide arvuga. R-s oleks vastav **kaalumata** keskmise arvutamise tehe järgmine:
 
 ```{r}
+library(tidyverse) # laeme andmetöötlust hõlbustava paketi tidyverse
+
 lang_pop |> # `lang_pop` on objekt, milles asuvad eelneva tabeli andmed
   summarise(kaalumata_keskmine = sum(osakaal) / n()) # käsk n() annab ridade arvu andmestikus (riikide arvu)
 ```
@@ -232,8 +239,6 @@ Loome uue andmeobjekti `ess10` ja omistame sellele ESS-i 10. laine andmestiku, m
 ```{r}
 ess10 <- haven::read_sav("data/ess10.sav")
 
-library(tidyverse)
-
 gr10 <- ess10 |> 
   filter(cntry == "GR") # filtreerime tunnuse cntry alusel Kreeka andmed
 ```
@@ -244,7 +249,7 @@ gr10 <- ess10 |>
 
 ### Tunnuse kaalutud sagedusjaotuse arvutamine
 
-Arvtame tunnuse `netusoft` (vastaja internetikasutuse sagedus) jaotuse funktsiooniga `dplyr::count`. Kui soovime kaalutud jaotust, tuleb käsku lisada argument `wt`, mille väärtuseks on kaalutunnus. Siinses näites arvutataksegi tunnuse `netusoft` kaalutud jaotus, mis esitatakse väljundtabelis veerus `n`; selle veeru väärtuste alusel arvutatakse funktsiooni `mutate` abil ka suhteline kaalutud jaotus ehk kaalutud protsentnäitajad. Pakett `dplyr` on osa `tidyverse`-st, mille eelnevalt laadisime `library`-käsuga mällu, seetõttu pole tarvis `dplyr`'it eraldi laadida.
+Arvtame tunnuse `netusoft` (vastaja internetikasutuse sagedus) jaotuse funktsiooniga `dplyr::count`. Kui soovime kaalutud jaotust, tuleb käsku lisada argument `wt`, mille väärtuseks on kaalutunnus. Siinses näites arvutataksegi tunnuse `netusoft` kaalutud jaotus, mis esitatakse väljundtabelis veerus `n`; selle veeru väärtuste alusel arvutatakse funktsiooni `mutate` abil ka suhteline kaalutud jaotus ehk kaalutud protsentnäitajad. Pakett `dplyr` on osa `tidyverse`-st, mille laadisime alguses `library`-käsuga mällu, seetõttu pole tarvis `dplyr`'it eraldi laadida.
 
 ```{r}
 gr10 |> 
@@ -372,10 +377,6 @@ prop_df <- list(prop_none,
 #| fig-cap: "Kreekas internetti igapäevaselt kasutavate inimeste osakaalu punkt- ja vahemikhinnang (usaldusnivool 95%) eri kaalumise seadete korral."
 #| echo: FALSE
 
-library(showtext)
-font_add_google("Rubik")
-showtext_auto() 
-
 prop_df |> 
   filter(netusoft == 5) |> 
 ggplot(aes(y = meetod, x = prop)) +
@@ -400,7 +401,7 @@ Samalaadseid erinevusi võrreldes kaalumata andmetelt tehtud arvutustega näeme 
 
 Paketid `srvyr` ja `survey` võimaldavad kaalutud andmetega läbi viia ka statistilisi teste. Need paketid töötavad koos: näiteks funktsioon `svyttest`, millega saab teha *t*-testi, on paketis `survey`, kuid selle sisendiks sobib meie varasemalt `srvyr`-i abil koostatud valikudisaini objekt `gr10w`. 
 
-Testime näitena, kas meeste ja naiste keskmine rahulolutase tervishoiusüsteemiga erineb. Funktsioon `svyttest` nõuab argumendi `formula` väärtusena testitavat mudelit valemi kujul, kus tildest ehk `~`-märgist vasakul pool on *t*-testi puhul arvuline tunnus, mille keskmisi võrreldakse (antud juhul rahulolu tervishoiusüsteemiga) ja paremal pool kategoriaalne tunnus (siin sugu). Argumendis `design` väärtuseks peab olema valikudisaini objekt, mis meil on juba eelnevalt defineeritud `gr10w`.
+Testime näitena, kas meeste ja naiste keskmine rahulolutase tervishoiusüsteemiga erineb. Funktsioon `svyttest` nõuab argumendi `formula` väärtusena testitavat mudelit valemi kujul, kus tildest ehk `~`-märgist vasakul pool on *t*-testi puhul arvuline tunnus, mille keskmisi võrreldakse (antud juhul rahulolu tervishoiusüsteemiga) ja paremal pool kategoriaalne tunnus (siin sugu). Argumendi `design` väärtuseks peab olema valikudisaini objekt, mis meil on juba eelnevalt defineeritud `gr10w`.
 
 ```{r}
 library(survey)
